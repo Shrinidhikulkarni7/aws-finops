@@ -1,0 +1,210 @@
+#!/usr/bin/env python3
+"""Fake AWS CLI for offline tests of finops_scan.py.
+
+Put this directory first on PATH; it answers `aws <service> <op> ...` with
+canned JSON that exercises every check. Unknown calls exit 1 (surfaced by the
+scanner as errors, so a clean run means every call was handled).
+
+Response shapes follow the AWS CLI's bundled service models; see
+tests/test_api_models.py, which checks the scanner's field assumptions against
+those models independently of this fake.
+
+Environment hooks for tests:
+  FAKE_AWS_LOG=path          append "service op" for every call
+  FAKE_AWS_ACCOUNT=id        account returned by sts get-caller-identity
+  FAKE_AWS_PARTITION=p       ARN partition (default aws)
+  FAKE_AWS_FAIL=svc:op,...   make these calls fail (AccessDenied)
+  FAKE_AWS_NO_METRICS=a,b    CloudWatch metric names that return no datapoints
+  FAKE_AWS_CO_STATUS=Active  Compute Optimizer enrollment status (default Inactive)
+  FAKE_AWS_OVERRIDE=json     {"service op": response} to replace canned responses
+"""
+import json
+import os
+import sys
+
+a = sys.argv[1:]
+svc, op = a[0], a[1]
+if os.environ.get("FAKE_AWS_LOG"):
+    with open(os.environ["FAKE_AWS_LOG"], "a") as fh:
+        fh.write(f"{svc} {op}\n")
+if f"{svc}:{op}" in os.environ.get("FAKE_AWS_FAIL", "").split(","):
+    sys.stderr.write(f"An error occurred (AccessDeniedException) when calling {op}")
+    sys.exit(254)
+_ovr = json.loads(os.environ.get("FAKE_AWS_OVERRIDE", "{}"))
+if f"{svc} {op}" in _ovr:
+    print(json.dumps(_ovr[f"{svc} {op}"]))
+    sys.exit(0)
+ACCOUNT = os.environ.get("FAKE_AWS_ACCOUNT", "111122223333")
+PARTITION = os.environ.get("FAKE_AWS_PARTITION", "aws")
+
+
+def out(x):
+    print(json.dumps(x))
+    sys.exit(0)
+
+
+def fail(msg):
+    sys.stderr.write(msg)
+    sys.exit(254)
+
+
+PRICE = json.dumps({"terms": {"OnDemand": {"x": {"priceDimensions": {
+    "y": {"unit": "Hrs", "pricePerUnit": {"USD": "0.192"}}}}}}})
+
+R = {
+    ("sts", "get-caller-identity"): {"Account": ACCOUNT, "Arn": f"arn:{PARTITION}:iam::{ACCOUNT}:user/test"},
+    ("ec2", "describe-volumes"): {"Volumes": [
+        {"VolumeId": "vol-0a7c3e5f9b2d41e68", "VolumeType": "gp2", "Size": 500, "State": "in-use", "CreateTime": "2024-01-01T00:00:00Z"},
+        {"VolumeId": "vol-0b8d4f6a1c3e52f79", "VolumeType": "gp3", "Size": 100, "State": "available", "CreateTime": "2024-01-01T00:00:00Z"},
+        {"VolumeId": "vol-0c9e5a7b2d4f63a8a", "VolumeType": "io1", "Size": 200, "Iops": 5000, "State": "in-use"}]},
+    ("ec2", "describe-instances"): {"Reservations": [{"Instances": [
+        {"InstanceId": "i-0f3a9c2e7b1d4a5c6", "InstanceType": "m5.xlarge", "State": {"Name": "running"},
+         "Tags": [{"Key": "Name", "Value": "web"}]},
+        {"InstanceId": "i-07b2d5e8a1c3f9e04", "InstanceType": "t2.micro", "State": {"Name": "stopped"},
+         "StateTransitionReason": "User initiated (2024-02-01 10:00:00 GMT)",
+         "BlockDeviceMappings": [{"Ebs": {"VolumeId": "vol-0a7c3e5f9b2d41e68"}}]},
+        {"InstanceId": "i-0c4e8a1f6b2d9e7a3", "InstanceType": "c5.large", "State": {"Name": "running"}}]}]},
+    ("ec2", "describe-addresses"): {"Addresses": [{"PublicIp": "1.2.3.4", "AllocationId": "eipalloc-0a1b2c3d4e5f67890"}]},
+    ("ec2", "describe-network-interfaces"): {"NetworkInterfaces": [
+        {"Association": {"PublicIp": "5.6.7.8"}, "InterfaceType": "interface"}]},
+    ("ec2", "describe-snapshots"): {"Snapshots": [
+        {"SnapshotId": "snap-0b7e3a9c1d5f2e8a4", "VolumeId": "vol-gone", "VolumeSize": 50, "StartTime": "2023-01-01T00:00:00Z"}]},
+    ("ec2", "describe-images"): {"Images": [{"ImageId": "ami-0e4c8a2f6b1d3e5a7", "CreationDate": "2022-01-01T00:00:00Z",
+                                             "BlockDeviceMappings": [{"Ebs": {"SnapshotId": "snap-0f1e2d3c4b5a69788", "VolumeSize": 8}}]}]},
+    ("elbv2", "describe-load-balancers"): {"LoadBalancers": [{
+        "LoadBalancerArn": "arn:aws:elasticloadbalancing:us-east-1:111122223333:loadbalancer/app/legacy-web-alb/50dc6c495c0c9188",
+        "LoadBalancerName": "legacy-web-alb", "Type": "application"}]},
+    ("elbv2", "describe-target-groups"): {"TargetGroups": []},
+    ("elb", "describe-load-balancers"): {"LoadBalancerDescriptions": []},
+    ("ec2", "describe-nat-gateways"): {"NatGateways": [{"NatGatewayId": "nat-0e5b1c9d3a7f2e4b8", "VpcId": "vpc-0d2f6a8c4e1b3957a", "State": "available"}]},
+    ("ec2", "describe-vpc-endpoints"): {"VpcEndpoints": []},
+    ("rds", "describe-db-instances"): {"DBInstances": [{
+        "DBInstanceIdentifier": "dev-db", "DBInstanceClass": "db.m5.large", "Engine": "postgres",
+        "EngineVersion": "12.19", "MultiAZ": True, "StorageType": "gp2", "AllocatedStorage": 200,
+        "DBInstanceStatus": "available"}]},
+    ("rds", "describe-db-snapshots"): {"DBSnapshots": []},
+    ("rds", "describe-db-clusters"): {"DBClusters": [{
+        "DBClusterIdentifier": "reporting-aurora", "Engine": "aurora-mysql", "EngineVersion": "5.7.mysql_aurora.2.11.2"}]},
+    ("logs", "describe-log-groups"): {"logGroups": [{"logGroupName": "/aws/lambda/checkout-api", "storedBytes": 300e9}]},
+    ("lambda", "list-functions"): {"Functions": [{"FunctionName": "image-resizer", "MemorySize": 3008}]},
+    ("eks", "list-clusters"): {"clusters": ["platform-prod"]},
+    ("eks", "describe-cluster-versions"): {"clusterVersions": [
+        {"clusterVersion": "1.29", "status": "extended-support", "endOfStandardSupportDate": "2025-03-23T00:00:00Z"},
+        {"clusterVersion": "1.34", "status": "standard-support", "endOfStandardSupportDate": "2026-12-02T00:00:00Z"}]},
+    ("eks", "describe-cluster"): {"cluster": {"name": "platform-prod", "arn": "arn:aws:eks:us-east-1:111122223333:cluster/platform-prod",
+                                              "version": "1.29", "upgradePolicy": {"supportType": "EXTENDED"}}},
+    ("dynamodb", "list-tables"): {"TableNames": ["orders-events"]},
+    ("dynamodb", "describe-table"): {"Table": {"ProvisionedThroughput": {"ReadCapacityUnits": 1000, "WriteCapacityUnits": 500}}},
+    ("application-autoscaling", "describe-scalable-targets"): {"ScalableTargets": []},
+    ("elasticache", "describe-cache-clusters"): {"CacheClusters": [
+        {"CacheClusterId": "sessions-cache", "CacheNodeType": "cache.r4.large", "Engine": "redis"}]},
+    ("opensearch", "list-domain-names"): {"DomainNames": []},
+    ("redshift", "describe-clusters"): {"Clusters": []},
+    ("sagemaker", "list-endpoints"): {"Endpoints": []},
+    ("sagemaker", "list-notebook-instances"): {"NotebookInstances": []},
+    ("secretsmanager", "list-secrets"): {"SecretList": [{"Name": "legacy/stripe-key", "CreatedDate": "2023-01-01T00:00:00Z"}]},
+    ("configservice", "describe-configuration-recorders"): {"ConfigurationRecorders": [
+        {"name": "default", "recordingGroup": {"allSupported": True}}]},
+    ("s3api", "list-buckets"): {"Buckets": [{"Name": "acme-data-lake"}]},
+    ("s3api", "get-bucket-location"): {"LocationConstraint": None},
+    ("s3api", "get-bucket-versioning"): {"Status": "Enabled"},
+    ("s3api", "list-multipart-uploads"): {"Uploads": [{"Key": "k"}]},
+    ("cloudtrail", "list-trails"): {"Trails": [
+        {"Name": "a", "TrailARN": "arn:a", "HomeRegion": "us-east-1"},
+        {"Name": "b", "TrailARN": "arn:b", "HomeRegion": "us-east-1"}]},
+    ("cloudtrail", "get-event-selectors"): {"EventSelectors": [{"IncludeManagementEvents": True, "DataResources": []}]},
+    ("route53", "list-hosted-zones"): {"HostedZones": [{"Name": "old-campaign.example.com.", "ResourceRecordSetCount": 2}]},
+    ("compute-optimizer", "get-idle-recommendations"): {"idleRecommendations": [
+        {"resourceType": "NatGateway", "resourceId": "nat-0e5b1c9d3a7f2e4b8", "finding": "Idle",
+         "savingsOpportunity": {"estimatedMonthlySavings": {"value": 32.85}}}]},
+    ("compute-optimizer", "get-enrollment-status"): {"status": os.environ.get("FAKE_AWS_CO_STATUS", "Inactive")},
+    ("ce", "get-savings-plans-coverage"): {"SavingsPlansCoverages": [{"Coverage": {"CoveragePercentage": "40"}}]},
+    ("ce", "get-savings-plans-utilization"): {"Total": {"Utilization": {"UtilizationPercentage": "88"}}},
+    ("ce", "get-reservation-coverage"): {"Total": {}},
+    ("ce", "get-reservation-utilization"): {"Total": {}},
+    ("ce", "get-savings-plans-purchase-recommendation"): {"SavingsPlansPurchaseRecommendation": {
+        "SavingsPlansPurchaseRecommendationSummary": {"EstimatedMonthlySavingsAmount": "400",
+                                                      "HourlyCommitmentToPurchase": "1.2"}}},
+    ("ce", "get-anomalies"): {"Anomalies": []},
+    ("ce", "get-anomaly-monitors"): {"AnomalyMonitors": []},
+}
+
+if (svc, op) == ("ce", "get-cost-and-usage"):
+    # A believable six-month bill; the grouping key picks the breakdown.
+    group = a[a.index("--group-by") + 1] if "--group-by" in a else ""
+    by = {
+        "Key=SERVICE": {"Amazon Elastic Compute Cloud - Compute": 18400, "Amazon Relational Database Service": 9100,
+                        "EC2 - Other": 6200, "Amazon Simple Storage Service": 3900, "Amazon Elastic Load Balancing": 1500,
+                        "Amazon Virtual Private Cloud": 2300, "AmazonCloudWatch": 1700, "Amazon DynamoDB": 1200,
+                        "Amazon Elastic Container Service for Kubernetes": 900, "Amazon Bedrock": 2600,
+                        "Amazon CloudFront": 800, "AWS Lambda": 400, "Tax": 0},
+        "Key=USAGE_TYPE": {"USE1-BoxUsage:m5.xlarge": 9800, "USE1-NatGateway-Bytes": 1900, "USE1-EBS:VolumeUsage.gp2": 2100,
+                           "USE1-DataTransfer-Regional-Bytes": 1200, "USE1-PublicIPv4:InUseAddress": 380,
+                           "USE1-ExtendedSupport:Yr3:MySQL5.7": 1170, "USE1-TimedStorage-ByteHrs": 2900,
+                           "USE1-DataProcessing-Bytes": 1100, "USE1-EBS:SnapshotUsage": 900},
+        "Key=LINKED_ACCOUNT": {"111122223333": 49000},
+        "Key=REGION": {"us-east-1": 39000, "eu-west-1": 10000},
+        "Key=PURCHASE_TYPE": {"On Demand Instances": 41000, "Savings Plans": 8000},
+    }.get(group.split(",")[-1], {"Amazon Elastic Compute Cloud - Compute": 18400})
+    months = ["2026-03-01", "2026-04-01", "2026-05-01", "2026-06-01", "2026-07-01", "2026-08-01"]
+    growth = [0.86, 0.88, 0.91, 0.95, 0.97, 1.0]
+    if "MONTHLY" in a and a[a.index("--time-period") + 1].startswith("Start=2026-09"):
+        months, growth = ["2026-09-01"], [0.8]          # month-to-date
+    elif "Key=SERVICE" not in group:
+        months, growth = ["2026-08-01"], [1.0]
+    out({"ResultsByTime": [{"TimePeriod": {"Start": m}, "Groups": [
+        {"Keys": [k], "Metrics": {"UnblendedCost": {"Amount": str(round(v * g, 2))}}} for k, v in by.items()]}
+        for m, g in zip(months, growth)]})
+if (svc, op) == ("pricing", "get-products"):
+    f = {}
+    for x in a:
+        if x.startswith("Type=TERM_MATCH,Field="):
+            k, v = x[len("Type=TERM_MATCH,Field="):].split(",Value=", 1)
+            f[k] = v
+    mult = 1.1 if f.get("regionCode") == "eu-west-1" else 1.0
+
+    def prod(usagetype, unit, usd):
+        return json.dumps({"product": {"attributes": {"usagetype": usagetype}},
+                           "terms": {"OnDemand": {"x": {"priceDimensions": {"y": {
+                               "unit": unit, "beginRange": "0", "pricePerUnit": {"USD": str(round(usd * mult, 6))}}}}}}})
+    fam = f.get("productFamily")
+    if "instanceType" in f:
+        out({"PriceList": [PRICE]})
+    ebs = {"gp2": 0.10, "gp3": 0.08, "io1": 0.125, "io2": 0.125, "st1": 0.045, "sc1": 0.015, "standard": 0.05}
+    table = {
+        "Storage": [prod("EBS:VolumeUsage", "GB-Mo", ebs.get(f.get("volumeApiName"), 0.10))]
+        if f.get("volumeApiName") else [prod("TimedStorage-ByteHrs", "GB-Mo", 0.023)],
+        "Storage Snapshot": [prod("EBS:SnapshotArchiveStorage", "GB-Mo", 0.0125), prod("EBS:SnapshotUsage", "GB-Mo", 0.05)],
+        "NAT Gateway": [prod("NatGateway-Hours", "Hrs", 0.045), prod("NatGateway-Bytes", "GB", 0.045)],
+        "Load Balancer-Application": [prod("LoadBalancerUsage", "Hrs", 0.0225), prod("LCUUsage", "LCU-Hrs", 0.008)],
+        "Load Balancer-Network": [prod("LoadBalancerUsage", "Hrs", 0.0225)],
+        "Load Balancer": [prod("LoadBalancerUsage", "Hrs", 0.025)],
+    }
+    out({"PriceList": table.get(fam, [])})
+if (svc, op) == ("s3api", "get-bucket-lifecycle-configuration"):
+    fail("An error occurred (NoSuchLifecycleConfiguration)")
+if (svc, op) == ("cost-optimization-hub", "list-recommendation-summaries"):
+    fail("AccessDeniedException: account not enrolled")
+if (svc, op) == ("cloudwatch", "get-metric-data"):
+    q = json.loads(a[a.index("--metric-data-queries") + 1])
+    vals = {"CPUUtilization": [1.0] * 14, "DatabaseConnections": [0] * 14,
+            "BytesInFromSource": [5e11], "BytesInFromDestination": [1e11],
+            "BucketSizeBytes": [2e12], "RequestCount": [3],
+            "ProvisionedReadCapacityUnits": [1000.0] * 336,
+            "ConsumedReadCapacityUnits": [10.0] * 336, "ConsumedWriteCapacityUnits": [5.0] * 336,
+            "ReadThrottleEvents": [], "WriteThrottleEvents": []}
+    empty = set(filter(None, os.environ.get("FAKE_AWS_NO_METRICS", "").split(",")))
+    res = []
+    for x in q:
+        name = x["MetricStat"]["Metric"]["MetricName"]
+        v = [] if name in empty else vals.get(name, [1])
+        # Simulate CLI pagination merging: split long series across two entries with the same Id.
+        if len(v) > 10:
+            res += [{"Id": x["Id"], "Values": v[: len(v) // 2]}, {"Id": x["Id"], "Values": v[len(v) // 2:]}]
+        else:
+            res.append({"Id": x["Id"], "Values": v})
+    out({"MetricDataResults": res})
+if (svc, op) in R:
+    out(R[(svc, op)])
+sys.stderr.write(f"fake aws: unhandled {svc} {op}")
+sys.exit(1)

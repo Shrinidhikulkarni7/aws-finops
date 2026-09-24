@@ -1,0 +1,5 @@
+finops-reports/
+__pycache__/
+.DS_Store
+*.key
+redaction-map*.json
