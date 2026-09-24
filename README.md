@@ -4,7 +4,7 @@ An agent skill that finds wasted spend in an AWS account and tells you what to d
 
 ![aws-finops report overview](assets/overview.png)
 
-You ask your coding agent (Claude Code, Codex, Cursor, Copilot, Gemini CLI and others) to look at your AWS costs. It runs a read-only scan, writes a report with charts and ranked recommendations, and explains the results. It never changes anything in your account.
+You ask your coding agent (Bob,Claude Code, Codex, Cursor, Copilot, Gemini CLI and others) to look at your AWS costs. It runs a read-only scan, writes a report with charts and ranked recommendations, and explains the results. It never changes anything in your account.
 
 ## Features
 
