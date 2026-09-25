@@ -2,7 +2,9 @@
 
 An agent skill that finds wasted spend in an AWS account and tells you what to do about it.
 
-![aws-finops report overview](assets/overview.png)
+[![aws-finops in 22 seconds](assets/demo.gif)](assets/aws-finops-demo.mp4)
+
+*A 22-second demo on synthetic data. [Watch it with sound](assets/aws-finops-demo.mp4).*
 
 You ask your coding agent (Claude Code, Codex, Cursor, Copilot, Gemini CLI and others) to look at your AWS costs. It runs a read-only scan, writes a report with charts and ranked recommendations, and explains the results. It never changes anything in your account.
 
@@ -41,6 +43,10 @@ You ask your coding agent (Claude Code, Codex, Cursor, Copilot, Gemini CLI and o
 ## What the report looks like
 
 These screenshots come from a synthetic test account, not real data. To try the interactive version, download [`assets/sample-report.html`](assets/sample-report.html) and open it in a browser.
+
+**Summary**
+
+![Summary](assets/overview.png)
 
 **Recommendations**
 
@@ -318,7 +324,7 @@ skills/aws-finops/
 ├── references/iam-policy.json   read-only IAM policy
 └── scripts/finops_scan.py       the scanner (Python standard library only)
 tests/                           tests and a fake AWS CLI (not part of the skill)
-assets/                          README images and the sample report
+assets/                          README images, demo video and the sample report
 ```
 
 Run the tests (no AWS account needed):
